@@ -18,7 +18,7 @@ import os
 import omni.ext
 from isaacsim.examples.browser import get_instance as get_browser_instance
 from isaacsim.examples.interactive.base_sample import BaseSampleUITemplate
-from .limo_diff import LimoDiffDrive
+from nolon_scenarios_python.limo_diff import LimoDiffDrive
 
 
 class LimoDiffDriveExtension(omni.ext.IExt):

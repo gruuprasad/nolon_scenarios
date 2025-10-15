@@ -14,6 +14,17 @@
 # limitations under the License.
 
 from isaacsim.examples.interactive.base_sample import BaseSample
+from isaacsim.robot.wheeled_robots.robots import WheeledRobot
+from isaacsim.core.utils.types import ArticulationAction
+from isaacsim.core.utils.stage import add_reference_to_stage
+from isaacsim.robot.wheeled_robots.controllers import WheelBasePoseController
+from isaacsim.core.api.physics_context import PhysicsContext
+
+from isaacsim.robot.wheeled_robots.controllers.holonomic_controller import HolonomicController
+from isaacsim.robot.wheeled_robots.controllers.differential_controller import DifferentialController
+
+import numpy as np
+import carb
 
 # Note: checkout the required tutorials at https://docs.isaacsim.omniverse.nvidia.com/latest/index.html
 
@@ -33,7 +44,7 @@ class MoveUR5(BaseSample):
 
         self._wheeled_robot = world.scene.add(
             WheeledRobot(
-                prim_path="/World/Ur5/base_link",
+                prim_path="/World/Ur5",
                 name="my_ur5",
                 wheel_dof_names=[
                     "fl_wheel_joint",
@@ -59,14 +70,15 @@ class MoveUR5(BaseSample):
         self._world = self.get_world()
         self._diff_controller = DifferentialController(
             name="simple_control",
-            wheel_radius=0.045,
-            wheel_base=0.43
+            wheel_radius=0.07,
+            wheel_base=0.6
         )
 
         self._diff_controller.reset()
         self._wheeled_robot.initialize()
 
         self._world.add_physics_callback("sending_actions", callback_fn=self.send_robot_actions)
+        carb.log_info("setup_post_load():Success")
 
         return
 
@@ -77,24 +89,24 @@ class MoveUR5(BaseSample):
         wheel_action = None
 
         # linear X, angular Z commands
-        if self._save_count >= 0 and self._save_count < 150:
-            wheel_action = self._diff_controller.forward(command=[0.3, 0.0])
-        elif self._save_count >= 150 and self._save_count < 300:
-            wheel_action = self._diff_controller.forward(command=[-0.3, 0.0])
-        elif self._save_count >= 300 and self._save_count < 450:
-            wheel_action = self._diff_controller.forward(command=[0.0, 0.3])
-        elif self._save_count >= 450 and self._save_count < 600:
-            wheel_action = self._diff_controller.forward(command=[0.0, -0.3])
-        else:
-            self._save_count = 0
+        if self._save_count <= 100:
+            wheel_action = self._diff_controller.forward(command=[1.0, 0.0])
+        elif self._save_count <= 250:
+            wheel_action = self._diff_controller.forward(command=[-1.0, 0.0])
+        elif self._save_count <= 300:
+            wheel_action = self._diff_controller.forward(command=[1.2, -0.8])
+        elif self._save_count <= 400:
+            wheel_action = self._diff_controller.forward(command=[-1.0, 1.5])
 
-        wheel_action.joint_velocities = np.hstack((wheel_action.joint_velocities, wheel_action.joint_velocities))
-        self._wheeled_robot.apply_wheel_actions(wheel_action)
+        if wheel_action:
+            wheel_action.joint_velocities = np.hstack((wheel_action.joint_velocities, wheel_action.joint_velocities))
+            print(wheel_action)
+            self._wheeled_robot.apply_wheel_actions(wheel_action)
         return
 
     async def setup_pre_reset(self):
-        if self._world.physics_callback_exists("sim_step"):
-            self._world.remove_physics_callback("sim_step")
+        if self._world.physics_callback_exists("sending_actions"):
+            self._world.remove_physics_callback("sending_actions")
         self._save_count = 0
         self._world.pause()
         return
