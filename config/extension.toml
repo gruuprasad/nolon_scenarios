@@ -20,6 +20,9 @@ writeTarget.kit = true
 [[python.module]]
 name = "nolon_scenarios_python.move_ur5"
 
+[[python.module]]
+name = "nolon_scenarios_python.limo_diff"
+
 args = [
     "--enable",
 ]
