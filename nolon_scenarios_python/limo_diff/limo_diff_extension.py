@@ -21,7 +21,7 @@ from isaacsim.examples.interactive.base_sample import BaseSampleUITemplate
 from .limo_diff import LimoDiffDrive
 
 
-class MoveUR5Extension(omni.ext.IExt):
+class LimoDiffDriveExtension(omni.ext.IExt):
     def on_startup(self, ext_id: str):
         self.scenario_name = "limo diff"
         self.category = "Nolon"

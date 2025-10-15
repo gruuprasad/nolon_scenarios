@@ -15,7 +15,7 @@
 
 from isaacsim.examples.interactive.base_sample import BaseSample
 from isaacsim.robot.wheeled_robots.robots import WheeledRobot
-from isaacsim.isaac.core.utils.types import ArticulationAction
+from isaacsim.core.utils.types import ArticulationAction
 from isaacsim.core.utils.stage import add_reference_to_stage
 from isaacsim.robot.wheeled_robots.controllers import WheelBasePoseController
 from isaacsim.core.api.physics_context import PhysicsContext
