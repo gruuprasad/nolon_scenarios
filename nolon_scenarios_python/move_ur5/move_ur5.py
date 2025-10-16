@@ -34,6 +34,9 @@ class MoveUR5(BaseSample):
         super().__init__()
 
         self._robot_path = "/home/ubuntu/nolon/assets/ur5_base.usd"
+        self._arm_joint_names = ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+                            "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"]
+
         return
 
     def setup_scene(self):
@@ -42,7 +45,7 @@ class MoveUR5(BaseSample):
         world.scene.add_default_ground_plane()
         add_reference_to_stage(usd_path=self._robot_path, prim_path="/World/Ur5")
 
-        self._wheeled_robot = world.scene.add(
+        self._ur5 = world.scene.add(
             WheeledRobot(
                 prim_path="/World/Ur5",
                 name="my_ur5",
@@ -75,7 +78,19 @@ class MoveUR5(BaseSample):
         )
 
         self._diff_controller.reset()
-        self._wheeled_robot.initialize()
+        self._ur5.initialize()
+
+        # Get their indices
+        self._arm_joint_indices = [
+            self._ur5.get_dof_index(joint_name) for joint_name in self._arm_joint_names
+        ]
+        print(self._arm_joint_names)
+        print(self._arm_joint_indices)
+        print(self._ur5.get_joints_default_state().positions)
+        self._ur5_base.set_joints_default_state(
+            positions=np.array([0, 0, 0, 0, 0, -np.pi / 2, -np.pi / 2, -np.pi / 2, -np.pi / 2, np.pi / 2, 0])
+        )
+        print(self._ur5.get_joint_positions())
 
         self._world.add_physics_callback("sending_actions", callback_fn=self.send_robot_actions)
         carb.log_info("setup_post_load():Success")
@@ -101,7 +116,7 @@ class MoveUR5(BaseSample):
         if wheel_action:
             wheel_action.joint_velocities = np.hstack((wheel_action.joint_velocities, wheel_action.joint_velocities))
             print(wheel_action)
-            self._wheeled_robot.apply_wheel_actions(wheel_action)
+            self._ur5.apply_wheel_actions(wheel_action)
         return
 
     async def setup_pre_reset(self):
