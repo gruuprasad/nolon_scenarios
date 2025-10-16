@@ -22,18 +22,19 @@ from isaacsim.core.api.physics_context import PhysicsContext
 
 from isaacsim.robot.wheeled_robots.controllers.holonomic_controller import HolonomicController
 from isaacsim.robot.wheeled_robots.controllers.differential_controller import DifferentialController
+from isaacsim.robot.manipulators import SingleManipulator
+from isaacsim.core.prims import SingleArticulation
 
 import numpy as np
 import carb
-
-# Note: checkout the required tutorials at https://docs.isaacsim.omniverse.nvidia.com/latest/index.html
-
 
 class MoveUR5(BaseSample):
     def __init__(self) -> None:
         super().__init__()
 
-        self._robot_path = "/home/ubuntu/nolon/assets/ur5_base.usd"
+        self._robot_path = "/home/ubuntu/nolon/assets/ur5.usd"
+        self._arm_joint_names = ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+                            "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"]
         return
 
     def setup_scene(self):
@@ -42,10 +43,10 @@ class MoveUR5(BaseSample):
         world.scene.add_default_ground_plane()
         add_reference_to_stage(usd_path=self._robot_path, prim_path="/World/Ur5")
 
-        self._wheeled_robot = world.scene.add(
+        self._ur5_base = world.scene.add(
             WheeledRobot(
                 prim_path="/World/Ur5",
-                name="my_ur5",
+                name="my_ur5_vehicle",
                 wheel_dof_names=[
                     "fl_wheel_joint",
                     "fr_wheel_joint",
@@ -57,6 +58,20 @@ class MoveUR5(BaseSample):
                 position=np.array([0, 0.0, 0.02]),
                 orientation=np.array([1.0, 0.0, 0.0, 0.0]),
             )
+        )
+        from isaacsim.core.prims import RigidPrim
+
+        # FIXME currently arm falls through the couterweight, because physics not enabled.
+        counterweight_prim_path = "/World/Ur5/Cleaning_robot/base_footprint/base_link/counterweight"
+
+        # Wrap the existing prim as a RigidPrim
+        counterweight = RigidPrim( prim_paths_expr=counterweight_prim_path,
+            name="counterweight",
+            translations = np.array([[0.03, 0.0, 0.275]]),  # N=1, x/y/z in meters
+            scales=np.array([[0.3, 0.2, 0.6]]),            # box size from URDF
+            masses=[10.0],                               # mass from URDF
+            orientations = np.array([[1.0, 0.0, 0.0, 0.0]]),  # identity quaternion
+            reset_xform_properties=True,                  # reset transform props
         )
 
         self._save_count = 0
@@ -75,9 +90,21 @@ class MoveUR5(BaseSample):
         )
 
         self._diff_controller.reset()
-        self._wheeled_robot.initialize()
+        self._ur5_base.initialize()
 
         self._world.add_physics_callback("sending_actions", callback_fn=self.send_robot_actions)
+
+        # Get their indices
+        self._arm_joint_indices = [
+            self._ur5_base.get_dof_index(joint_name) for joint_name in self._arm_joint_names
+        ]
+        print(self._arm_joint_names)
+        print(self._arm_joint_indices)
+        print(self._ur5_base.get_joints_default_state().positions)
+        self._ur5_base.set_joints_default_state(
+            positions=np.array([0, 0, 0, 0, 0, -np.pi / 2, -np.pi / 2, -np.pi / 2, -np.pi / 2, np.pi / 2, 0])
+        )
+        print(self._ur5_base.get_joint_positions())
         carb.log_info("setup_post_load():Success")
 
         return
@@ -85,14 +112,15 @@ class MoveUR5(BaseSample):
     def send_robot_actions(self, step_size):
 
         self._save_count += 1
+        print(self._ur5_base.get_joint_positions())
 
         wheel_action = None
 
         # linear X, angular Z commands
         if self._save_count <= 100:
-            wheel_action = self._diff_controller.forward(command=[1.0, 0.0])
+            wheel_action = self._diff_controller.forward(command=[2.0, 0.0])
         elif self._save_count <= 250:
-            wheel_action = self._diff_controller.forward(command=[-1.0, 0.0])
+            wheel_action = self._diff_controller.forward(command=[-2.0, 0.0])
         elif self._save_count <= 300:
             wheel_action = self._diff_controller.forward(command=[1.2, -0.8])
         elif self._save_count <= 400:
@@ -100,13 +128,13 @@ class MoveUR5(BaseSample):
 
         if wheel_action:
             wheel_action.joint_velocities = np.hstack((wheel_action.joint_velocities, wheel_action.joint_velocities))
-            print(wheel_action)
-            self._wheeled_robot.apply_wheel_actions(wheel_action)
+            self._ur5_base.apply_wheel_actions(wheel_action)
         return
 
     async def setup_pre_reset(self):
         if self._world.physics_callback_exists("sending_actions"):
             self._world.remove_physics_callback("sending_actions")
+
         self._save_count = 0
         self._world.pause()
         return
