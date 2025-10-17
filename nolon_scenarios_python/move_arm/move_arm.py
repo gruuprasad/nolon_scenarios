@@ -27,24 +27,36 @@ from isaacsim.core.api.tasks import BaseTask
 from isaacsim.core.api.scenes.scene import Scene
 from isaacsim.core.api.controllers import BaseController
 from isaacsim.core.utils.stage import add_reference_to_stage
+from isaacsim.core.utils.rotations import euler_angles_to_quat
+from isaacsim.core.prims import Articulation
+from isaacsim.core.utils.types import ArticulationActions
 
+import asyncio
 import numpy as np
 import carb
 
 class HandWaveController(BaseController):
     def __init__(self):
         super().__init__(name="hand_wave_controller")
+        self._increment_step = np.pi/16
+        self._index_map = {"pan": 6, "lift": 7}
+        self._lower_limit = -np.pi/4
+        self._upper_limit = np.pi/4
 
-    def forward(self, command: str, current_joint_positions: np.ndarray, joint_indices=None) -> ArticulationAction:
-        if command == "move":
-            print("move comamdn received")
-            pass  #TODO
-        elif command == "still":
-            print(current_joint_positions)
-        else:
+    def forward(self, command, current_joint_position) -> ArticulationAction:
+        print("HandWaveController::forward() called: ", command)
+        if command not in self._index_map.keys():
             return
+        if current_joint_position == self._lower_limit:
+            self._increment_step = np.pi/24
+        elif current_joint_position == self._upper_limit:
+            self._increment_step = -np.pi/24
 
-        action = ArticulationAction(joint_positions=current_joint_positions, joint_indices=joint_indices)
+        current_joint_position += self._increment_step
+        print("new joint position = ", current_joint_position)
+        # only updating pan_joint for now
+        action = ArticulationActions(joint_positions=np.array([[current_joint_position, 0]]),
+                                    joint_indices=[self._index_map[command], 7])
         return action
 
     def is_done(self):
@@ -58,6 +70,7 @@ class HandWaving(BaseTask):
         self._ur5_robot = None
         self._ur5_asset_path = "/home/ubuntu/nolon/assets/ur5.usd"
         self.number_of_waves = 3
+        self.num_envs = 1
 
     def set_up_scene(self, scene: Scene) -> None:
         print("HandWaving::set_up_scene():called")
@@ -66,31 +79,22 @@ class HandWaving(BaseTask):
 
         add_reference_to_stage(usd_path=self._ur5_asset_path, prim_path="/World/Scene/Ur5")
         self._ur5_robot = scene.add(
-            WheeledRobot(
-                prim_path="/World/Scene/Ur5",
+            Articulation(
+                prim_paths_expr="/World/Scene/Ur5",
                 name="my_ur5",
-                wheel_dof_names=[
-                    "fl_wheel_joint",
-                    "fr_wheel_joint",
-                    "rl_wheel_joint",
-                    "rr_wheel_joint",
-                ],
-                create_robot=False,
-                usd_path=self._ur5_asset_path,
-                position=np.array([0, 0.0, 0.02]),
-                orientation=np.array([1.0, 0.0, 0.0, 0.0]),
+                positions=np.array([[0, 0.0, 0.02]]),
+                orientations=np.array([euler_angles_to_quat(np.array([0, 0, -3*np.pi/4]))])
             )
         )
-        self._ur5_robot.set_joints_default_state(
-            positions=np.array([0, 0, 0, 0, 0, -np.pi / 2, -np.pi/2, -np.pi/2, -np.pi/2, -np.pi/2, -np.pi/2])
-        )
+
 
     def get_observations(self) -> dict:
         print("HandWaving::get_observations():called")
-        joints_state = self._ur5_robot.get_joints_state()
+        positions = self._ur5_robot.get_joint_positions()[0]
         return {
             "my_ur5": {
-                "joint_positions": joints_state.positions
+                "shoulder_pan_joint": positions[6],
+                "shoulder_lift_joint": positions[7]
             }
         }
 
@@ -114,8 +118,8 @@ class HandWaving(BaseTask):
 class MoveArm(BaseSample):
     def __init__(self) -> None:
         super().__init__()
-        self._articulation_controller = None
         self._controller = None
+        self._my_robot = None
 
         return
 
@@ -131,22 +135,43 @@ class MoveArm(BaseSample):
         self._ur5_task = self._world.get_task(name="hand_waving")
 
         self._task_params = self._ur5_task.get_params()
-        my_ur5 = self._world.scene.get_object(self._task_params["robot_name"]["value"])
-        self._articulation_controller = my_ur5.get_articulation_controller()
+        self._my_robot = self._world.scene.get_object(self._task_params["robot_name"]["value"])
         self._controller = HandWaveController()
 
         self._world.add_physics_callback("sim_step", self.on_pbysics_step)
-        await self._world.play_async()
+
+        # stiffness and dampness for the joints
+        current_kp, current_kd = self._my_robot.get_gains(joint_indices=np.array([6, 7]))
+        current_max_effort = self._my_robot.get_max_efforts(joint_indices=np.array([6, 7]))
+        # values by default on loading usd.
+        print("stiffness = ", current_kp)               #stiffness =  [[290362.97 219451.75]]
+        print("dampness = ", current_kd)                #dampness =  [[116.14518  87.7807 ]]
+        print("max_effort = ", current_max_effort)      #max_effort =  [[10. 10.]]
+        stiffness = np.tile(np.array([500, 800]), (1, 1))
+        dampings = np.tile(np.array([50, 100]), (1, 1))
+        max_efforts = np.tile(np.array([100, 300]), (1, 1))
+        self._my_robot.set_gains(kps=stiffness, kds=dampings, joint_indices=np.array([6, 7]))
+        self._my_robot.set_max_efforts(max_efforts, joint_indices=np.array([6, 7]))
+        #self._my_robot.set_joints_default_state(
+        #    positions=np.array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]])
+        #)
+
         return
 
     def on_pbysics_step(self, step_size):
         observations = self._world.get_observations()
-        # TODO add action here.
-        actions = self._controller.forward("still", current_joint_positions=observations[self._task_params["robot_name"]["value"]]["joint_positions"])
-        if self._controller.is_done():
-            self._world.pause()
-        if actions is not None:
-            self._articulation_controller.apply_action(actions)
+        shoulder_lift_state = observations[self._task_params["robot_name"]["value"]]["shoulder_lift_joint"]
+        shoulder_pan_state = observations[self._task_params["robot_name"]["value"]]["shoulder_pan_joint"]
+
+        action = self._controller.forward("pan", shoulder_pan_state)
+        self._my_robot.apply_action(action)
+
+        current_kp, current_kd = self._my_robot.get_gains(joint_indices=np.array([6, 7]))
+        current_max_effort = self._my_robot.get_max_efforts(joint_indices=np.array([6, 7]))
+        print("stiffness = ", current_kp)
+        print("dampness = ", current_kd)
+        print("current_max_effort = ", current_max_effort)
+
         return
 
     async def setup_pre_reset(self):
