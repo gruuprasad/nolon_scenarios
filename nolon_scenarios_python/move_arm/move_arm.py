@@ -39,24 +39,22 @@ class HandWaveController(BaseController):
     def __init__(self):
         super().__init__(name="hand_wave_controller")
         self._increment_step = np.pi/16
-        self._index_map = {"pan": 6, "lift": 7}
-        self._lower_limit = -np.pi/4
-        self._upper_limit = np.pi/4
+        self._lower_limit = -np.pi/8
+        self._upper_limit = np.pi/2
 
-    def forward(self, command, current_joint_position) -> ArticulationAction:
-        print("HandWaveController::forward() called: ", command)
-        if command not in self._index_map.keys():
-            return
-        if current_joint_position == self._lower_limit:
-            self._increment_step = np.pi/24
-        elif current_joint_position == self._upper_limit:
-            self._increment_step = -np.pi/24
+    def forward(self, index, current_joint_position):
+        print("HandWaveController::forward() called: ", index)
+        if current_joint_position <= self._lower_limit:
+            self._increment_step = np.pi/16
+        elif current_joint_position >= self._upper_limit:
+            self._increment_step = -np.pi/16
+        print("increment step: ", self._increment_step)
 
         current_joint_position += self._increment_step
         print("new joint position = ", current_joint_position)
         # only updating pan_joint for now
-        action = ArticulationActions(joint_positions=np.array([[current_joint_position, 0]]),
-                                    joint_indices=[self._index_map[command], 7])
+        action = ArticulationActions(joint_positions=np.array([[current_joint_position]]),
+                                    joint_indices=[index])
         return action
 
     def is_done(self):
@@ -91,10 +89,11 @@ class HandWaving(BaseTask):
     def get_observations(self) -> dict:
         print("HandWaving::get_observations():called")
         positions = self._ur5_robot.get_joint_positions()[0]
+        actions = self._ur5_robot.get_applied_actions()
         return {
             "my_ur5": {
-                "shoulder_pan_joint": positions[6],
-                "shoulder_lift_joint": positions[7]
+                "joint_positions": positions,
+                "last_joint_positions": actions.joint_positions[0]
             }
         }
 
@@ -120,6 +119,8 @@ class MoveArm(BaseSample):
         super().__init__()
         self._controller = None
         self._my_robot = None
+        self._index = 5
+        self._total_steps = 0
 
         return
 
@@ -141,8 +142,8 @@ class MoveArm(BaseSample):
         self._world.add_physics_callback("sim_step", self.on_pbysics_step)
 
         # stiffness and dampness for the joints
-        current_kp, current_kd = self._my_robot.get_gains(joint_indices=np.array([6, 7]))
-        current_max_effort = self._my_robot.get_max_efforts(joint_indices=np.array([6, 7]))
+        current_kp, current_kd = self._my_robot.get_gains(joint_indices=np.array([self._index]))
+        current_max_effort = self._my_robot.get_max_efforts(joint_indices=np.array([self._index]))
         # values by default on loading usd.
         print("stiffness = ", current_kp)               #stiffness =  [[290362.97 219451.75]]
         print("dampness = ", current_kd)                #dampness =  [[116.14518  87.7807 ]]
@@ -150,27 +151,42 @@ class MoveArm(BaseSample):
         stiffness = np.tile(np.array([500, 800]), (1, 1))
         dampings = np.tile(np.array([50, 100]), (1, 1))
         max_efforts = np.tile(np.array([100, 300]), (1, 1))
-        self._my_robot.set_gains(kps=stiffness, kds=dampings, joint_indices=np.array([6, 7]))
-        self._my_robot.set_max_efforts(max_efforts, joint_indices=np.array([6, 7]))
-        #self._my_robot.set_joints_default_state(
-        #    positions=np.array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]])
-        #)
+        self._my_robot.set_gains(kps=stiffness, kds=dampings)
+        self._my_robot.set_max_efforts(max_efforts)
+        self._my_robot.set_joints_default_state(
+            positions=np.array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]])
+        )
 
         return
 
     def on_pbysics_step(self, step_size):
-        observations = self._world.get_observations()
-        shoulder_lift_state = observations[self._task_params["robot_name"]["value"]]["shoulder_lift_joint"]
-        shoulder_pan_state = observations[self._task_params["robot_name"]["value"]]["shoulder_pan_joint"]
 
-        action = self._controller.forward("pan", shoulder_pan_state)
+        # control joint positions under test.
+        if self._index == 10:
+            return
+
+        self._total_steps += 1
+        if self._total_steps % 6000 == 0:
+            action = ArticulationActions(joint_positions=np.array([[0]]),
+                                    joint_indices=[self._index])
+            self._my_robot.apply_action(action)
+            self._index += 1
+            return
+
+        observations = self._world.get_observations()
+        joint_position = observations[self._task_params["robot_name"]["value"]]["joint_positions"][self._index]
+        last_joint_position = observations[self._task_params["robot_name"]["value"]]["last_joint_positions"][self._index]
+        print("last_joint_position = ", last_joint_position)
+        print("new joint position = ", joint_position)
+
+        action = self._controller.forward(self._index, joint_position)
         self._my_robot.apply_action(action)
 
-        current_kp, current_kd = self._my_robot.get_gains(joint_indices=np.array([6, 7]))
-        current_max_effort = self._my_robot.get_max_efforts(joint_indices=np.array([6, 7]))
-        print("stiffness = ", current_kp)
-        print("dampness = ", current_kd)
-        print("current_max_effort = ", current_max_effort)
+        #current_kp, current_kd = self._my_robot.get_gains(joint_indices=np.array([self._index]))
+        #current_max_effort = self._my_robot.get_max_efforts(joint_indices=np.array([self._index]))
+        #print("stiffness = ", current_kp)
+        #print("dampness = ", current_kd)
+        #print("current_max_effort = ", current_max_effort)
 
         return
 
