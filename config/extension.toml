@@ -23,6 +23,9 @@ name = "nolon_scenarios_python.move_ur5"
 [[python.module]]
 name = "nolon_scenarios_python.limo_diff"
 
+[[python.module]]
+name = "nolon_scenarios_python.move_arm"
+
 args = [
     "--enable",
 ]
